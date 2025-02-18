@@ -19,3 +19,7 @@
 {"timestamp":"2025-02-18T04:01:26.947Z","method":"POST","path":"/send-custom-mail","query":{"to":"manojgowdabr89@gmail.com"},"status":200,"duration":"1225ms","userAgent":"PostmanRuntime/7.43.0","ip":"::1","owner":"Skoegle"}
 {"timestamp":"2025-02-18T05:03:23.508Z","method":"GET","path":"/send-otp","query":{"to":"manojgowdabr89@gmail.com"},"status":401,"duration":"6ms","userAgent":"PostmanRuntime/7.43.0","ip":"::1","owner":"anonymous"}
 {"timestamp":"2025-02-18T05:03:36.353Z","method":"GET","path":"/send-otp","query":{"to":"manojgowdabr89@gmail.com"},"status":200,"duration":"1527ms","userAgent":"PostmanRuntime/7.43.0","ip":"::1","owner":"Skoegle"}
+{"timestamp":"2025-02-18T05:24:53.178Z","method":"GET","path":"/send-otp","query":{"to":"manojgowdabr89@gmail.com"},"status":401,"duration":"4ms","userAgent":"PostmanRuntime/7.43.0","ip":"::1","owner":"anonymous"}
+{"timestamp":"2025-02-18T05:25:07.947Z","method":"GET","path":"/send-otp","query":{"to":"manojgowdabr89@gmail.com"},"status":500,"duration":"355ms","userAgent":"PostmanRuntime/7.43.0","ip":"::1","owner":"Skoegle"}
+{"timestamp":"2025-02-18T05:25:16.676Z","method":"GET","path":"/send-otp","query":{"to":"manojgowdabr89@gmail.com"},"status":500,"duration":"295ms","userAgent":"PostmanRuntime/7.43.0","ip":"::1","owner":"Skoegle"}
+{"timestamp":"2025-02-18T05:36:17.604Z","method":"GET","path":"/send-otp","query":{"to":"manojgowdabr89@gmail.com"},"status":200,"duration":"1932ms","userAgent":"PostmanRuntime/7.43.0","ip":"::1","owner":"Skoegle"}
