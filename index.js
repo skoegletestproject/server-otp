@@ -215,7 +215,7 @@ app.get('/send-otp', validateBearerToken, async (req, res) => {
     const now = Date.now();
 
     if (!to || !to.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-        return res.status(400).json({ error: 'Valid email address required' });
+        return res.status(400).json({ error: 'Valid email address required', valid: false });
     }
 
 
@@ -225,7 +225,8 @@ app.get('/send-otp', validateBearerToken, async (req, res) => {
         const timeLeft = Math.ceil((userRequests.resetTime - now) / 1000 / 60);
         return res.status(429).json({
             error: 'OTP limit reached',
-            message: `Please wait ${timeLeft} minutes`
+            message: `Please wait ${timeLeft} minutes`,
+            valid: false
         });
     }
 
@@ -255,7 +256,8 @@ app.get('/send-otp', validateBearerToken, async (req, res) => {
         res.status(200).json({
             message: 'OTP sent successfully',
             validFor: '5 minutes',
-            remainingAttempts: 10 - (userRequests.count + 1)
+            remainingAttempts: 10 - (userRequests.count + 1),
+            valid: true
         });
     } catch (error) {
         console.error('Email error:', error);
@@ -268,22 +270,22 @@ app.get('/verify-otp', validateBearerToken, (req, res) => {
     const now = Date.now();
 
     if (!to || !otp) {
-        return res.status(400).json({ error: 'Email and OTP required' });
+        return res.status(400).json({ error: 'Email and OTP required' ,valid: false});
     }
 
     const otpData = otps.get(to);
     if (!otpData) {
-        return res.status(400).json({ error: 'OTP expired or not found' });
+        return res.status(400).json({ error: 'OTP expired or not found' ,valid: false});
     }
 
     if (now > otpData.expiry) {
         otps.delete(to);
-        return res.status(400).json({ error: 'OTP expired' });
+        return res.status(400).json({ error: 'OTP expired' ,valid: false});
     }
 
     if (otpData.attempts >= 3) {
         otps.delete(to);
-        return res.status(400).json({ error: 'Too many failed attempts' });
+        return res.status(400).json({ error: 'Too many failed attempts',valid: false });
     }
 
     if (otpData.code === otp) {
@@ -298,7 +300,8 @@ app.get('/verify-otp', validateBearerToken, (req, res) => {
         transporter.sendMail(mailOptions);
         return res.status(200).json({
             message: 'OTP verified successfully',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            valid: true
         });
     }
 
