@@ -215,7 +215,7 @@ app.get('/send-otp', validateBearerToken, async (req, res) => {
     const now = Date.now();
 
     if (!to || !to.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-        return res.json({ error: 'Valid email address required' });
+        return res.status(400).json({ error: 'Valid email address required' });
     }
 
 
@@ -268,22 +268,22 @@ app.get('/verify-otp', validateBearerToken, (req, res) => {
     const now = Date.now();
 
     if (!to || !otp) {
-        return res.json({ error: 'Email and OTP required' });
+        return res.status(400).json({ error: 'Email and OTP required' });
     }
 
     const otpData = otps.get(to);
     if (!otpData) {
-        return res.json({ error: 'OTP expired or not found' });
+        return res.status(400).json({ error: 'OTP expired or not found' });
     }
 
     if (now > otpData.expiry) {
         otps.delete(to);
-        return res.json({ error: 'OTP expired' });
+        return res.status(400).json({ error: 'OTP expired' });
     }
 
     if (otpData.attempts >= 3) {
         otps.delete(to);
-        return res.json({ error: 'Too many failed attempts' });
+        return res.status(400).json({ error: 'Too many failed attempts' });
     }
 
     if (otpData.code === otp) {
@@ -305,7 +305,7 @@ app.get('/verify-otp', validateBearerToken, (req, res) => {
     otpData.attempts++;
     otps.set(to, otpData);
 
-    res.json({
+    res.status(400).json({
         error: 'Invalid OTP',
         remainingAttempts: 5 - otpData.attempts
     });
@@ -316,7 +316,7 @@ app.get('/status', validateBearerToken, (req, res) => {
     const now = Date.now();
 
     if (!email) {
-        return res.json({ error: 'Email required' });
+        return res.status(400).json({ error: 'Email required' });
     }
 
     const otpData = otps.get(email);
@@ -342,11 +342,11 @@ app.post('/send-custom-mail', validateBearerToken, async (req, res) => {
     const { to } = req.query;
 
     if (!to || !to.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-        return res.json({ error: 'Valid email address required' });
+        return res.status(400).json({ error: 'Valid email address required' });
     }
 
     if (!subject || !body) {
-        return res.json({ error: 'Subject and body are required' });
+        return res.status(400).json({ error: 'Subject and body are required' });
     }
 
     const mailOptions = {
