@@ -293,8 +293,8 @@ app.get('/verify-otp', validateBearerToken, (req, res) => {
         const mailOptions = {
             from: process.env.SMTP_EMAIL,
             to,
-            subject: 'Login Successful',
-            text: 'Your login was successful.'
+            subject: 'Otp verified',
+            text: 'Your OTP has been verified successfully'
         };
 
         transporter.sendMail(mailOptions);
