@@ -173,7 +173,7 @@ const validateBearerToken = (req, res, next) => {
 
 
 const transporter = nodemailer.createTransport({
-    host: 'smtp.zoho.in',
+    host: process.env.SMTP_HOST,
     port: 465,
     secure: true,
     auth: {
