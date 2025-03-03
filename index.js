@@ -33,7 +33,7 @@ const API_TOKENS = {
             maxRequests: 100
         }
     },
-    'Bearer     ': {
+    'Bearer sf8s48fsf4s4f8s4d8f48sf': {
         owner: SYSTEM_CONFIG.currentUser,
         createdAt: SYSTEM_CONFIG.systemStartTime,
         expiresAt: '2026-02-17 09:31:31',
