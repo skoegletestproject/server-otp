@@ -212,7 +212,8 @@ const whitelist = [
     'http://localhost:3001',
     'http://localhost:4200',
     'http://localhost:8080',
-    'http://localhost:5001'
+    'http://localhost:5001',
+    "https://v-marg2-0.onrender.com"
 ];
 
 const corsOptions = {
