@@ -5,13 +5,29 @@ const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
-
+const axios = require('axios'); // Add axios for making HTTP requests to SMS API
+const Log = require('./Log'); // Import Log model from Logs.js
 const app = express();
 const port = process.env.PORT || 3000;
-
+const mongoose = require('mongoose');
 require('dotenv').config();
 
-// Ensure logs directory exists
+
+function connectToMongoDB() {
+    const uri = process.env.MONGODB_URI;
+    mongoose.connect(uri, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true
+    });
+
+    const db = mongoose.connection;
+    db.on('error', console.error.bind(console, 'MongoDB connection error:'));
+    db.once('open', () => {
+        console.log('Connected to MongoDB');
+    });
+}
+connectToMongoDB()
+
 const logDir = path.join(__dirname, 'logs');
 if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true });
@@ -19,7 +35,7 @@ if (!fs.existsSync(logDir)) {
 
 const SYSTEM_CONFIG = {
     currentUser: process.env.CURRENT_USER || 'ManojGowda89',
-    systemStartTime: '2025-03-14 05:41:09', // Updated to current time
+    systemStartTime: '2025-03-18 09:25:48', 
     version: '1.0.0',
     tokenExpiration: '365d',
 };
@@ -60,7 +76,7 @@ const API_TOKENS = {
     [process.env.PRIMARY_TOKEN || 'Bearer sf8s48fsf4s4f8s4d8f48sf']: {
         owner: SYSTEM_CONFIG.currentUser,
         createdAt: SYSTEM_CONFIG.systemStartTime,
-        expiresAt: '2026-03-14 05:41:09',
+        expiresAt: '2026-03-18 09:25:48',
         permissions: ['send-otp', 'verify-otp', 'status', 'health', 'send-custom-mail', 'logs'],
         active: true,
         type: 'primary',
@@ -69,7 +85,7 @@ const API_TOKENS = {
     [process.env.BACKUP_TOKEN || 'Bearer backup48fsf4s4f8s4d8f48sf']: {
         owner: SYSTEM_CONFIG.currentUser,
         createdAt: SYSTEM_CONFIG.systemStartTime,
-        expiresAt: '2026-03-14 05:41:09',
+        expiresAt: '2026-03-18 09:25:48',
         permissions: ['send-otp', 'verify-otp', 'status', 'health', 'send-custom-mail', 'logs'],
         active: true,
         type: 'backup',
@@ -80,6 +96,12 @@ const API_TOKENS = {
 const userAttempts = new Map();
 const userOTPRequests = new Map();
 const otps = new Map();
+
+// SMS API Configuration
+const SMS_CONFIG = {
+    apiUrl: process.env.SMS_API_URL ,
+    apiKey: process.env.SMS_API_KEY 
+};
 
 // Flexible SMTP Configuration
 const getEmailTransporter = () => {
@@ -233,35 +255,34 @@ const corsOptions = {
 
 const logRequest = (req, res, next) => {
     const start = Date.now();
-    // Add transaction ID for tracking
     req.transactionId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
-    res.on('finish', () => {
+    res.on('finish', async () => {
         const duration = Date.now() - start;
-        const log = {
-            timestamp: new Date().toISOString(),
+
+        // Create log object
+        const logData = {
+            timestamp: new Date(),
             method: req.method,
-            path: req.path,
+            path: req.originalUrl || req.path,
             query: req.query,
             status: res.statusCode,
-            duration: `${duration}ms`,
+            duration: duration,
             userAgent: req.headers['user-agent'],
             ip: req.ip,
             owner: req.tokenDetails?.owner || 'anonymous',
             transactionId: req.transactionId
         };
 
-        console.log(JSON.stringify(log));
-
-        fs.appendFile(
-            path.join(logDir, `${new Date().toISOString().split('T')[0]}.log`),
-            JSON.stringify(log) + '\n',
-            (err) => {
-                if (err) console.error('Error writing to log file:', err);
-            }
-        );
+        try {
+            // Save log to MongoDB
+            await Log.create(logData);
+            console.log("Log stored successfully:", logData);
+        } catch (err) {
+            console.error("Error storing log in MongoDB:", err);
+        }
     });
-    
+
     next();
 };
 
@@ -324,6 +345,37 @@ const validateEmail = (email) => {
     return regex.test(String(email).toLowerCase());
 };
 
+// Add phone number validation
+const validatePhoneNumber = (number) => {
+    // Simple regex for phone numbers (can be enhanced based on requirements)
+    const regex = /^\d{10,15}$/;
+    return regex.test(String(number).replace(/\D/g, ''));
+};
+
+// Function to send SMS via API
+const sendSMS = async (number, message) => {
+    try {
+        const url = `${SMS_CONFIG.apiUrl}?apikey=${SMS_CONFIG.apiKey}&number=${number}&message=${encodeURIComponent(message)}`;
+        const response = await axios.get(url);
+        
+        if (response.status === 200) {
+            return { success: true };
+        } else {
+            console.error('SMS API error:', response.data);
+            return { 
+                success: false, 
+                error: 'SMS API returned non-200 status code'
+            };
+        }
+    } catch (error) {
+        console.error('SMS sending error:', error);
+        return { 
+            success: false, 
+            error: error.message 
+        };
+    }
+};
+
 app.use(cors(corsOptions));
 app.use(morgan('dev'));
 app.use(express.json());
@@ -342,14 +394,32 @@ app.get('/health', validateBearerToken, (req, res) => {
 });
 
 app.get('/send-otp', validateBearerToken, async (req, res) => {
-    const { to } = req.query;
+    const { to, type = 'email' } = req.query; // Default to email if type not specified
     const now = Date.now();
 
-    if (!to || !validateEmail(to)) {
+    // Check if the OTP delivery type is valid
+    if (!['email', 'sms'].includes(type)) {
+        return res.json({
+            error: 'Invalid OTP delivery type',
+            valid: false,
+            message: 'Type must be either email or sms',
+            transactionId: req.transactionId
+        });
+    }
+
+    // Validate recipient based on type
+    if (type === 'email' && (!to || !validateEmail(to))) {
         return res.json({ 
             error: 'Valid email address required', 
             valid: false, 
             message: 'Please provide a valid email address',
+            transactionId: req.transactionId
+        });
+    } else if (type === 'sms' && (!to || !validatePhoneNumber(to))) {
+        return res.json({ 
+            error: 'Valid phone number required', 
+            valid: false, 
+            message: 'Please provide a valid phone number',
             transactionId: req.transactionId
         });
     }
@@ -367,41 +437,57 @@ app.get('/send-otp', validateBearerToken, async (req, res) => {
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const mailOptions = {
-        from: process.env.SMTP_USER,
-        to,
-        subject: 'Your OTP Code',
-        text: `Your OTP is ${otp}. Valid for 5 minutes.`
-    };
-
+    
     try {
-        await transporter.sendMail(mailOptions);
+        let sendResult;
+        
+        if (type === 'email') {
+            const mailOptions = {
+                from: process.env.SMTP_USER,
+                to,
+                subject: 'Your OTP Code',
+                text: `Your OTP is ${otp}. Valid for 5 minutes.`
+            };
+            
+            await transporter.sendMail(mailOptions);
+            sendResult = { success: true };
+        } else if (type === 'sms') {
+            // Format the SMS message
+            const smsMessage = `Your OTP is ${otp}. Valid for 5 minutes.`;
+            sendResult = await sendSMS(to, smsMessage);
+        }
 
-        userOTPRequests.set(to, {
-            count: userRequests.count + 1,
-            resetTime: userRequests.resetTime,
-            lastRequest: now
-        });
+        if (sendResult.success) {
+            userOTPRequests.set(to, {
+                count: userRequests.count + 1,
+                resetTime: userRequests.resetTime,
+                lastRequest: now,
+                type // Store the OTP type for reference
+            });
 
-        otps.set(to, {
-            code: otp,
-            expiry: now + (5 * 60 * 1000),
-            attempts: 0
-        });
+            otps.set(to, {
+                code: otp,
+                expiry: now + (5 * 60 * 1000),
+                attempts: 0,
+                type // Store the OTP type for reference
+            });
 
-        res.json({
-            message: 'OTP sent successfully',
-            validFor: '5 minutes',
-            remainingAttempts: 10 - (userRequests.count + 1),
-            valid: true,
-            transactionId: req.transactionId
-        });
+            res.json({
+                message: `OTP sent successfully via ${type}`,
+                validFor: '5 minutes',
+                remainingAttempts: 10 - (userRequests.count + 1),
+                valid: true,
+                transactionId: req.transactionId
+            });
+        } else {
+            throw new Error(sendResult.error || `Failed to send OTP via ${type}`);
+        }
     } catch (error) {
-        console.error('Email error:', error);
+        console.error(`${type} error:`, error);
         res.json({ 
-            error: 'Failed to send OTP',
+            error: `Failed to send OTP via ${type}`,
             valid: false,
-            message: 'Email service error',
+            message: `${type === 'email' ? 'Email' : 'SMS'} service error: ${error.message}`,
             transactionId: req.transactionId
         });
     }
@@ -413,9 +499,9 @@ app.get('/verify-otp', validateBearerToken, (req, res) => {
 
     if (!to || !otp) {
         return res.json({ 
-            error: 'Email and OTP required',
+            error: 'Recipient and OTP required',
             valid: false, 
-            message: 'Please provide email and OTP',
+            message: 'Please provide recipient (email/phone) and OTP',
             transactionId: req.transactionId
         });
     }
@@ -451,17 +537,22 @@ app.get('/verify-otp', validateBearerToken, (req, res) => {
     }
 
     if (otpData.code === otp) {
+        const otpType = otpData.type || 'email'; // Default to email if type not stored
         otps.delete(to);
-        const mailOptions = {
-            from: process.env.SMTP_USER,
-            to,
-            subject: 'OTP verified',
-            text: 'Your OTP has been verified successfully'
-        };
+        
+        // Only send confirmation for email OTPs
+        if (otpType === 'email' && validateEmail(to)) {
+            const mailOptions = {
+                from: process.env.SMTP_USER,
+                to,
+                subject: 'OTP verified',
+                text: 'Your OTP has been verified successfully'
+            };
 
-        transporter.sendMail(mailOptions).catch(err => {
-            console.error('Error sending verification email:', err);
-        });
+            transporter.sendMail(mailOptions).catch(err => {
+                console.error('Error sending verification email:', err);
+            });
+        }
         
         return res.json({
             message: 'OTP verified successfully',
@@ -484,22 +575,24 @@ app.get('/verify-otp', validateBearerToken, (req, res) => {
 });
 
 app.get('/status', validateBearerToken, (req, res) => {
-    const { email } = req.query;
+    const { to } = req.query; // Changed from 'email' to more generic 'to'
     const now = Date.now();
 
-    if (!email) {
+    if (!to) {
         return res.status(400).json({ 
-            error: 'Email required',
+            error: 'Recipient required',
             valid: false,
             transactionId: req.transactionId
         });
     }
 
-    const otpData = otps.get(email);
-    const requestData = userOTPRequests.get(email);
+    const otpData = otps.get(to);
+    const requestData = userOTPRequests.get(to);
+    const otpType = otpData?.type || requestData?.type || 'unknown';
 
     res.status(200).json({
-        email,
+        recipient: to,
+        recipientType: otpType,
         otpStatus: otpData ? {
             valid: now < otpData.expiry,
             expiresIn: Math.max(0, Math.ceil((otpData.expiry - now) / 1000)),
@@ -514,50 +607,95 @@ app.get('/status', validateBearerToken, (req, res) => {
     });
 });
 
-app.post('/send-custom-mail', validateBearerToken, async (req, res) => {
-    const { subject, body } = req.body;
-    const { to } = req.query;
+app.get('/send-custom-mail', validateBearerToken, async (req, res) => {
+    const { to, type = 'email', subject, body } = req.query;
 
-    if (!to || !validateEmail(to)) {
+    // Check if the message delivery type is valid
+    if (!['email', 'sms'].includes(type)) {
+        return res.status(400).json({ 
+            error: 'Invalid message type',
+            valid: false,
+            message: 'Type must be either email or sms',
+            transactionId: req.transactionId
+        });
+    }
+
+    // Validate recipient based on type
+    if (type === 'email' && (!to || !validateEmail(to))) {
         return res.status(400).json({ 
             error: 'Valid email address required',
             valid: false,
             transactionId: req.transactionId
         });
-    }
-
-    if (!subject || !body) {
+    } else if (type === 'sms' && (!to || !validatePhoneNumber(to))) {
         return res.status(400).json({ 
-            error: 'Subject and body are required',
+            error: 'Valid phone number required',
             valid: false,
             transactionId: req.transactionId
         });
     }
 
-    const mailOptions = {
-        from: process.env.SMTP_USER,
-        to,
-        subject,
-        text: body
-    };
+    // Validate message content
+    if (!body) {
+        return res.status(400).json({ 
+            error: 'Message body is required',
+            valid: false,
+            transactionId: req.transactionId
+        });
+    }
+
+    // Subject is only required for email
+    if (type === 'email' && !subject) {
+        return res.status(400).json({ 
+            error: 'Subject is required for email messages',
+            valid: false,
+            transactionId: req.transactionId
+        });
+    }
 
     try {
-        await transporter.sendMail(mailOptions);
-        res.status(200).json({ 
-            message: 'Email sent successfully',
-            valid: true,
-            transactionId: req.transactionId
-        });
+        if (type === 'email') {
+            // Send email
+            const mailOptions = {
+                from: process.env.SMTP_USER,
+                to,
+                subject,
+                text: body
+            };
+
+            await transporter.sendMail(mailOptions);
+            
+            res.status(200).json({ 
+                message: 'Email sent successfully',
+                valid: true,
+                transactionId: req.transactionId
+            });
+        } else if (type === 'sms') {
+            const smsMessage = subject ? `${subject}\n\n${body}` : body;
+            
+            // Send SMS
+            const sendResult = await sendSMS(to, smsMessage);
+            
+            if (sendResult.success) {
+                res.status(200).json({ 
+                    message: 'SMS sent successfully',
+                    valid: true,
+                    transactionId: req.transactionId
+                });
+            } else {
+                throw new Error(sendResult.error || 'Failed to send SMS');
+            }
+        }
     } catch (error) {
-        console.error('Email error:', error);
+        console.error(`${type} sending error:`, error);
         res.status(500).json({ 
-            error: 'Failed to send email',
+            error: `Failed to send ${type}`,
             valid: false,
+            message: error.message,
             transactionId: req.transactionId
         });
     }
 });
-
 app.get('/logs', validateBearerToken, (req, res) => {
     // Only allow users with specific permissions to access logs
     if (req.tokenDetails.type !== 'primary') {
@@ -661,4 +799,5 @@ app.listen(port, () => {
     console.log(`Running on http://localhost:${port}`);
     console.log(`Current user: ${SYSTEM_CONFIG.currentUser}`);
     console.log(`Email configuration: ${process.env.SMTP_SERVICE || 'Direct'} mode with host ${process.env.SMTP_HOST || 'smtp.zoho.com'}`);
+    console.log(`SMS configuration: API URL ${SMS_CONFIG.apiUrl}`);
 });
